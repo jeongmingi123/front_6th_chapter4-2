@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   Box,
   Button,
@@ -82,27 +82,140 @@ const TIME_SLOTS = [
 
 const PAGE_SIZE = 100;
 
-const fetchMajors = () => axios.get<Lecture[]>("/schedules-majors.json");
-const fetchLiberalArts = () =>
-  axios.get<Lecture[]>("/schedules-liberal-arts.json");
+// API 호출 최적화 - 캐싱 추가
+let lecturesCache: Lecture[] | null = null;
+let loadingPromise: Promise<Lecture[]> | null = null;
 
-// TODO: 이 코드를 개선해서 API 호출을 최소화 해보세요 + Promise.all이 현재 잘못 사용되고 있습니다. 같이 개선해주세요.
-const fetchAllLectures = async () => {
-  const [majorsResult, liberalArtsResult] = await Promise.all([
-    fetchMajors(),
-    fetchLiberalArts(),
-  ]);
+const fetchAllLectures = async (): Promise<Lecture[]> => {
+  // 이미 캐시된 데이터가 있으면 반환
+  if (lecturesCache) {
+    return lecturesCache;
+  }
 
-  return [majorsResult, liberalArtsResult];
+  // 이미 로딩 중이면 기존 Promise 반환
+  if (loadingPromise) {
+    return loadingPromise;
+  }
+
+  // 새로운 로딩 시작
+  loadingPromise = (async () => {
+    const start = performance.now();
+    console.log("API 호출 시작: ", start);
+
+    try {
+      const [majorsResult, liberalArtsResult] = await Promise.all([
+        axios.get<Lecture[]>("/schedules-majors.json"),
+        axios.get<Lecture[]>("/schedules-liberal-arts.json"),
+      ]);
+
+      const allLectures = [...majorsResult.data, ...liberalArtsResult.data];
+
+      const end = performance.now();
+      console.log("모든 API 호출 완료 ", end);
+      console.log("API 호출에 걸린 시간(ms): ", end - start);
+
+      // 캐시에 저장
+      lecturesCache = allLectures;
+      return allLectures;
+    } finally {
+      // 로딩 완료 후 Promise 초기화
+      loadingPromise = null;
+    }
+  })();
+
+  return loadingPromise;
 };
 
-// TODO: 이 컴포넌트에서 불필요한 연산이 발생하지 않도록 다양한 방식으로 시도해주세요.
-const SearchDialog = ({ searchInfo, onClose }: Props) => {
+// 강의 데이터를 미리 파싱하여 캐시
+const createLectureCache = (lectures: Lecture[]) => {
+  return lectures.map((lecture) => ({
+    ...lecture,
+    parsedSchedules: lecture.schedule ? parseSchedule(lecture.schedule) : [],
+    titleLower: lecture.title.toLowerCase(),
+    idLower: lecture.id.toLowerCase(),
+  }));
+};
+
+type CachedLecture = ReturnType<typeof createLectureCache>[0];
+
+// 필터링 로직을 별도 함수로 분리하여 최적화
+const filterLectures = (
+  lectures: CachedLecture[],
+  searchOptions: SearchOption
+): CachedLecture[] => {
+  const { query = "", credits, grades, days, times, majors } = searchOptions;
+  const queryLower = query.toLowerCase();
+
+  return lectures.filter((lecture) => {
+    // 검색어 필터 (미리 소문자로 변환된 값 사용)
+    if (
+      query &&
+      !lecture.titleLower.includes(queryLower) &&
+      !lecture.idLower.includes(queryLower)
+    ) {
+      return false;
+    }
+
+    // 학년 필터
+    if (grades.length > 0 && !grades.includes(lecture.grade)) {
+      return false;
+    }
+
+    // 전공 필터
+    if (majors.length > 0 && !majors.includes(lecture.major)) {
+      return false;
+    }
+
+    // 학점 필터
+    if (credits && !lecture.credits.startsWith(String(credits))) {
+      return false;
+    }
+
+    // 요일/시간 필터 (미리 파싱된 스케줄 사용)
+    if (days.length > 0 || times.length > 0) {
+      const schedules = lecture.parsedSchedules;
+
+      if (days.length > 0 && !schedules.some((s) => days.includes(s.day))) {
+        return false;
+      }
+
+      if (
+        times.length > 0 &&
+        !schedules.some((s) => s.range.some((time) => times.includes(time)))
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+};
+
+// 체크박스 그룹 컴포넌트를 메모이제이션
+const MemoizedCheckboxGroup = memo(
+  ({
+    children,
+    value,
+    onChange,
+    colorScheme,
+  }: {
+    children: React.ReactNode;
+    value: any[];
+    onChange: (value: any[]) => void;
+    colorScheme?: string;
+  }) => (
+    <CheckboxGroup value={value} onChange={onChange} colorScheme={colorScheme}>
+      {children}
+    </CheckboxGroup>
+  )
+);
+
+const SearchDialog = memo(({ searchInfo, onClose }: Props) => {
   const { setSchedulesMap } = useScheduleContext();
 
   const loaderWrapperRef = useRef<HTMLDivElement>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
-  const [lectures, setLectures] = useState<Lecture[]>([]);
+  const [lectures, setLectures] = useState<CachedLecture[]>([]);
   const [page, setPage] = useState(1);
   const [searchOptions, setSearchOptions] = useState<SearchOption>({
     query: "",
@@ -112,62 +225,28 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
     majors: [],
   });
 
-  const filteredLectures = useMemo(() => {
-    const { query = "", credits, grades, days, times, majors } = searchOptions;
-    const queryLower = query.toLowerCase();
-
-    return lectures.filter((lecture) => {
-      // 검색어 필터
-      if (
-        query &&
-        !lecture.title.toLowerCase().includes(queryLower) &&
-        !lecture.id.toLowerCase().includes(queryLower)
-      ) {
-        return false;
-      }
-
-      // 학년 필터
-      if (grades.length > 0 && !grades.includes(lecture.grade)) {
-        return false;
-      }
-
-      // 전공 필터
-      if (majors.length > 0 && !majors.includes(lecture.major)) {
-        return false;
-      }
-
-      // 학점 필터
-      if (credits && !lecture.credits.startsWith(String(credits))) {
-        return false;
-      }
-
-      // 요일/시간 필터 (parseSchedule을 한 번만 호출)
-      if (days.length > 0 || times.length > 0) {
-        const schedules = lecture.schedule
-          ? parseSchedule(lecture.schedule)
-          : [];
-
-        if (days.length > 0 && !schedules.some((s) => days.includes(s.day))) {
-          return false;
-        }
-
-        if (
-          times.length > 0 &&
-          !schedules.some((s) => s.range.some((time) => times.includes(time)))
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [lectures, searchOptions]);
-  const lastPage = Math.ceil(filteredLectures.length / PAGE_SIZE);
-  const visibleLectures = filteredLectures.slice(0, page * PAGE_SIZE);
-
-  const allMajors = useMemo(() => {
-    return [...new Set(lectures.map((lecture) => lecture.major))];
+  // 강의 데이터를 캐시된 형태로 변환
+  const cachedLectures = useMemo(() => {
+    if (lectures.length === 0) return [];
+    return lectures;
   }, [lectures]);
+
+  // 필터링된 강의 목록을 메모이제이션
+  const filteredLectures = useMemo(() => {
+    return filterLectures(cachedLectures, searchOptions);
+  }, [cachedLectures, searchOptions]);
+
+  // 페이지네이션 계산을 메모이제이션
+  const paginationInfo = useMemo(() => {
+    const lastPage = Math.ceil(filteredLectures.length / PAGE_SIZE);
+    const visibleLectures = filteredLectures.slice(0, page * PAGE_SIZE);
+    return { lastPage, visibleLectures };
+  }, [filteredLectures, page]);
+
+  // 전공 목록을 메모이제이션
+  const allMajors = useMemo(() => {
+    return [...new Set(cachedLectures.map((lecture) => lecture.major))];
+  }, [cachedLectures]);
 
   // 검색 옵션 변경 핸들러 메모이제이션
   const changeSearchOption = useCallback(
@@ -180,13 +259,20 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
   );
 
   const addSchedule = useCallback(
-    (lecture: Lecture) => {
+    (lecture: CachedLecture) => {
       if (!searchInfo) return;
 
       const { tableId } = searchInfo;
-      const schedules = parseSchedule(lecture.schedule).map((schedule) => ({
+      const schedules = lecture.parsedSchedules.map((schedule) => ({
         ...schedule,
-        lecture,
+        lecture: {
+          id: lecture.id,
+          title: lecture.title,
+          grade: lecture.grade,
+          credits: lecture.credits,
+          major: lecture.major,
+          schedule: lecture.schedule,
+        },
       }));
 
       setSchedulesMap((prev) => ({
@@ -199,17 +285,15 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
     [searchInfo, setSchedulesMap, onClose]
   );
 
+  // API 호출 최적화
   useEffect(() => {
-    const start = performance.now();
-    console.log("API 호출 시작: ", start);
-    fetchAllLectures().then((results) => {
-      const end = performance.now();
-      console.log("모든 API 호출 완료 ", end);
-      console.log("API 호출에 걸린 시간(ms): ", end - start);
-      setLectures(results.flatMap((result) => result.data));
+    fetchAllLectures().then((rawLectures) => {
+      const cached = createLectureCache(rawLectures);
+      setLectures(cached);
     });
   }, []);
 
+  // Intersection Observer 최적화
   useEffect(() => {
     const $loader = loaderRef.current;
     const $loaderWrapper = loaderWrapperRef.current;
@@ -221,7 +305,9 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          setPage((prevPage) => Math.min(lastPage, prevPage + 1));
+          setPage((prevPage) =>
+            Math.min(paginationInfo.lastPage, prevPage + 1)
+          );
         }
       },
       { threshold: 0, root: $loaderWrapper }
@@ -229,9 +315,13 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
 
     observer.observe($loader);
 
-    return () => observer.unobserve($loader);
-  }, [lastPage]);
+    return () => {
+      observer.unobserve($loader);
+      observer.disconnect(); // 메모리 누수 방지
+    };
+  }, [paginationInfo.lastPage]);
 
+  // searchInfo 변경 시 검색 옵션 업데이트
   useEffect(() => {
     setSearchOptions((prev) => ({
       ...prev,
@@ -278,7 +368,7 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
             <HStack spacing={4}>
               <FormControl>
                 <FormLabel>학년</FormLabel>
-                <CheckboxGroup
+                <MemoizedCheckboxGroup
                   value={searchOptions.grades}
                   onChange={(value) =>
                     changeSearchOption("grades", value.map(Number))
@@ -291,12 +381,12 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
                       </Checkbox>
                     ))}
                   </HStack>
-                </CheckboxGroup>
+                </MemoizedCheckboxGroup>
               </FormControl>
 
               <FormControl>
                 <FormLabel>요일</FormLabel>
-                <CheckboxGroup
+                <MemoizedCheckboxGroup
                   value={searchOptions.days}
                   onChange={(value) =>
                     changeSearchOption("days", value as string[])
@@ -309,14 +399,14 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
                       </Checkbox>
                     ))}
                   </HStack>
-                </CheckboxGroup>
+                </MemoizedCheckboxGroup>
               </FormControl>
             </HStack>
 
             <HStack spacing={4}>
               <FormControl>
                 <FormLabel>시간</FormLabel>
-                <CheckboxGroup
+                <MemoizedCheckboxGroup
                   colorScheme="green"
                   value={searchOptions.times}
                   onChange={(values) =>
@@ -362,12 +452,12 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
                       </Box>
                     ))}
                   </Stack>
-                </CheckboxGroup>
+                </MemoizedCheckboxGroup>
               </FormControl>
 
               <FormControl>
                 <FormLabel>전공</FormLabel>
-                <CheckboxGroup
+                <MemoizedCheckboxGroup
                   colorScheme="green"
                   value={searchOptions.majors}
                   onChange={(values) =>
@@ -411,7 +501,7 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
                       </Box>
                     ))}
                   </Stack>
-                </CheckboxGroup>
+                </MemoizedCheckboxGroup>
               </FormControl>
             </HStack>
             <Text align="right">검색결과: {filteredLectures.length}개</Text>
@@ -433,7 +523,7 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
               <Box overflowY="auto" maxH="500px" ref={loaderWrapperRef}>
                 <Table size="sm" variant="striped">
                   <Tbody>
-                    {visibleLectures.map((lecture, index) => (
+                    {paginationInfo.visibleLectures.map((lecture, index) => (
                       <Tr key={`${lecture.id}-${index}`}>
                         <Td width="100px">{lecture.id}</Td>
                         <Td width="50px">{lecture.grade}</Td>
@@ -468,6 +558,8 @@ const SearchDialog = ({ searchInfo, onClose }: Props) => {
       </ModalContent>
     </Modal>
   );
-};
+});
+
+SearchDialog.displayName = "SearchDialog";
 
 export default SearchDialog;
