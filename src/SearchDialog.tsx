@@ -73,9 +73,12 @@ const cachedFetch = (
   return promise;
 };
 
-const fetchMajors = () => axios.get<Lecture[]>("/schedules-majors.json");
+const base =
+  process.env.NODE_ENV === "production" ? "/front_6th_chapter4-2/" : "/";
+
+const fetchMajors = () => axios.get<Lecture[]>(`${base}schedules-majors.json`);
 const fetchLiberalArts = () =>
-  axios.get<Lecture[]>("/schedules-liberal-arts.json");
+  axios.get<Lecture[]>(`${base}schedules-liberal-arts.json`);
 
 const cachedFetchMajors = () => cachedFetch(fetchMajors);
 const cachedFetchLiberalArts = () => cachedFetch(fetchLiberalArts);
