@@ -131,13 +131,47 @@ const fetchAllLectures = async (): Promise<Lecture[]> => {
 const createLectureCache = (lectures: Lecture[]) => {
   return lectures.map((lecture) => ({
     ...lecture,
-    parsedSchedules: lecture.schedule ? parseSchedule(lecture.schedule) : [],
+    parsedSchedules: lecture.schedule
+      ? parseSchedule(lecture.schedule).map((schedule) => ({
+          ...schedule,
+          lecture: {
+            id: lecture.id,
+            title: lecture.title,
+            grade: lecture.grade,
+            credits: lecture.credits,
+            major: lecture.major,
+            schedule: lecture.schedule,
+          },
+        }))
+      : [],
     titleLower: lecture.title.toLowerCase(),
     idLower: lecture.id.toLowerCase(),
   }));
 };
 
-type CachedLecture = ReturnType<typeof createLectureCache>[0];
+type CachedLecture = {
+  id: string;
+  title: string;
+  credits: string;
+  major: string;
+  schedule: string;
+  grade: number;
+  parsedSchedules: Array<{
+    day: string;
+    range: number[];
+    room?: string;
+    lecture: {
+      id: string;
+      title: string;
+      grade: number;
+      credits: string;
+      major: string;
+      schedule: string;
+    };
+  }>;
+  titleLower: string;
+  idLower: string;
+};
 
 // 필터링 로직을 별도 함수로 분리하여 최적화
 const filterLectures = (
@@ -147,7 +181,7 @@ const filterLectures = (
   const { query = "", credits, grades, days, times, majors } = searchOptions;
   const queryLower = query.toLowerCase();
 
-  return lectures.filter((lecture) => {
+  const filtered = lectures.filter((lecture) => {
     // 검색어 필터 (미리 소문자로 변환된 값 사용)
     if (
       query &&
@@ -176,13 +210,18 @@ const filterLectures = (
     if (days.length > 0 || times.length > 0) {
       const schedules = lecture.parsedSchedules;
 
-      if (days.length > 0 && !schedules.some((s) => days.includes(s.day))) {
+      if (
+        days.length > 0 &&
+        !schedules.some((s: any) => days.includes(s.day))
+      ) {
         return false;
       }
 
       if (
         times.length > 0 &&
-        !schedules.some((s) => s.range.some((time) => times.includes(time)))
+        !schedules.some((s: any) =>
+          s.range.some((time: any) => times.includes(time))
+        )
       ) {
         return false;
       }
@@ -190,6 +229,7 @@ const filterLectures = (
 
     return true;
   });
+  return filtered;
 };
 
 const SearchDialog = memo(({ searchInfo, onClose }: Props) => {
@@ -268,11 +308,27 @@ const SearchDialog = memo(({ searchInfo, onClose }: Props) => {
     [changeSearchOption]
   );
 
+  const handleQueryChange = useCallback(
+    (value: string) => {
+      changeSearchOption("query", value);
+    },
+    [changeSearchOption]
+  );
+
+  const handleCreditsChange = useCallback(
+    (value: string | number) => {
+      const creditsValue =
+        typeof value === "string" ? parseInt(value) || undefined : value;
+      changeSearchOption("credits", creditsValue);
+    },
+    [changeSearchOption]
+  );
+
   const addSchedule = useAutoCallback((lecture: CachedLecture) => {
     if (!searchInfo) return;
 
     const { tableId } = searchInfo;
-    const schedules = lecture.parsedSchedules.map((schedule) => ({
+    const schedules = lecture.parsedSchedules.map((schedule: any) => ({
       ...schedule,
       lecture: {
         id: lecture.id,
@@ -346,10 +402,16 @@ const SearchDialog = memo(({ searchInfo, onClose }: Props) => {
         <ModalCloseButton />
         <ModalBody>
           <VStack spacing={4} align="stretch">
-            <SearchControls.SearchInputFilter
-              searchOptions={searchOptions}
-              onChange={changeSearchOption}
-            />
+            <HStack spacing={4}>
+              <SearchControls.SearchInput
+                value={searchOptions.query || ""}
+                onChange={handleQueryChange}
+              />
+              <SearchControls.CreditsSelect
+                value={searchOptions.credits || ""}
+                onChange={handleCreditsChange}
+              />
+            </HStack>
 
             <HStack spacing={4}>
               <SearchControls.GradeFilter
