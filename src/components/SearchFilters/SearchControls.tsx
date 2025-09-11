@@ -109,46 +109,48 @@ const StringCheckboxGroup = memo(
 
 StringCheckboxGroup.displayName = "StringCheckboxGroup";
 
-// SearchInputFilter 컴포넌트
-interface SearchInputFilterProps {
-  searchOptions: SearchOption;
-  onChange: (
-    field: keyof SearchOption,
-    value: SearchOption[typeof field]
-  ) => void;
+// SearchInput 컴포넌트 - 검색어 입력 필드
+interface SearchInputProps {
+  value: string;
+  onChange: (value: string) => void;
 }
 
-const SearchInputFilter = memo(
-  ({ searchOptions, onChange }: SearchInputFilterProps) => {
-    return (
-      <HStack spacing={4}>
-        <FormControl>
-          <FormLabel>검색어</FormLabel>
-          <Input
-            placeholder="과목명 또는 과목코드"
-            value={searchOptions.query || ""}
-            onChange={(e) => onChange("query", e.target.value)}
-          />
-        </FormControl>
+const SearchInput = memo(({ value, onChange }: SearchInputProps) => {
+  return (
+    <FormControl>
+      <FormLabel>검색어</FormLabel>
+      <Input
+        placeholder="과목명 또는 과목코드"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </FormControl>
+  );
+});
 
-        <FormControl>
-          <FormLabel>학점</FormLabel>
-          <Select
-            value={searchOptions.credits || ""}
-            onChange={(e) => onChange("credits", e.target.value)}
-          >
-            <option value="">전체</option>
-            <option value="1">1학점</option>
-            <option value="2">2학점</option>
-            <option value="3">3학점</option>
-          </Select>
-        </FormControl>
-      </HStack>
-    );
-  }
-);
+SearchInput.displayName = "SearchInput";
 
-SearchInputFilter.displayName = "SearchInputFilter";
+// CreditsSelect 컴포넌트 - 학점 선택 필드
+interface CreditsSelectProps {
+  value: string | number;
+  onChange: (value: string | number) => void;
+}
+
+const CreditsSelect = memo(({ value, onChange }: CreditsSelectProps) => {
+  return (
+    <FormControl>
+      <FormLabel>학점</FormLabel>
+      <Select value={value || ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">전체</option>
+        <option value="1">1학점</option>
+        <option value="2">2학점</option>
+        <option value="3">3학점</option>
+      </Select>
+    </FormControl>
+  );
+});
+
+CreditsSelect.displayName = "CreditsSelect";
 
 // GradeFilter 컴포넌트
 interface GradeFilterProps {
@@ -251,6 +253,23 @@ const TimeFilter = memo(({ value, onChange }: TimeFilterProps) => {
 
 TimeFilter.displayName = "TimeFilter";
 
+// MajorTagItem 컴포넌트 - 개별 전공 태그 아이템
+interface MajorTagItemProps {
+  major: string;
+  onRemove: (major: string) => void;
+}
+
+const MajorTagItem = memo(({ major, onRemove }: MajorTagItemProps) => {
+  return (
+    <Tag size="sm" variant="outline" colorScheme="blue">
+      <TagLabel>{major.split("<p>").pop()}</TagLabel>
+      <TagCloseButton onClick={() => onRemove(major)} />
+    </Tag>
+  );
+});
+
+MajorTagItem.displayName = "MajorTagItem";
+
 // MajorFilter 컴포넌트
 interface MajorFilterProps {
   value: string[];
@@ -269,12 +288,13 @@ const MajorFilter = memo(({ value, onChange, allMajors }: MajorFilterProps) => {
       >
         <Wrap spacing={1} mb={2}>
           {value.map((major) => (
-            <Tag key={major} size="sm" variant="outline" colorScheme="blue">
-              <TagLabel>{major.split("<p>").pop()}</TagLabel>
-              <TagCloseButton
-                onClick={() => onChange(value.filter((v) => v !== major))}
-              />
-            </Tag>
+            <MajorTagItem
+              key={major}
+              major={major}
+              onRemove={(majorToRemove) =>
+                onChange(value.filter((v) => v !== majorToRemove))
+              }
+            />
           ))}
         </Wrap>
         <Stack
@@ -315,8 +335,6 @@ const SearchControls = memo(
   ({ searchOptions, onChange, allMajors }: SearchControlsProps) => {
     return (
       <VStack spacing={4} align="stretch">
-        <SearchInputFilter searchOptions={searchOptions} onChange={onChange} />
-
         <HStack spacing={4}>
           <GradeFilter
             value={searchOptions.grades}
@@ -348,11 +366,13 @@ SearchControls.displayName = "SearchControls";
 
 // 네임스페이스 객체로 export
 const SearchControlsNamespace = {
-  SearchInputFilter,
+  SearchInput,
+  CreditsSelect,
   GradeFilter,
   DayFilter,
   TimeFilter,
   MajorFilter,
+  MajorTagItem,
   // 메인 컨테이너 컴포넌트도 포함
   Container: SearchControls,
 };
@@ -362,10 +382,12 @@ export default SearchControlsNamespace;
 
 // 개별 컴포넌트들도 named export로 제공
 export {
-  SearchInputFilter,
+  SearchInput,
+  CreditsSelect,
   GradeFilter,
   DayFilter,
   TimeFilter,
   MajorFilter,
+  MajorTagItem,
   SearchControls,
 };
