@@ -13,8 +13,6 @@ import {
   Tbody,
   Td,
   Text,
-  Th,
-  Thead,
   Tr,
   VStack,
 } from "@chakra-ui/react";
@@ -24,6 +22,7 @@ import { parseSchedule } from "./utils.ts";
 import axios from "axios";
 import { useAutoCallback } from "./hooks/useAutoCallback.ts";
 import SearchControls from "./components/SearchFilters/SearchControls.tsx";
+import SearchTableHeader from "./components/SearchResult/SearchTableHeader.tsx";
 
 interface Props {
   searchInfo: {
@@ -43,11 +42,43 @@ export interface SearchOption {
   credits?: number;
 }
 
+interface ApiResponse<T> {
+  data: T;
+  status: number;
+}
+
 const PAGE_SIZE = 100;
 
 // API 호출 최적화 - 캐싱 추가
 let lecturesCache: Lecture[] | null = null;
 let loadingPromise: Promise<Lecture[]> | null = null;
+
+// 컴포넌트 외부에서 사용할 캐시 맵
+const cachedApi = new Map<string, ApiResponse<Lecture[]>>();
+
+const cachedFetch = (
+  fetchFn: () => Promise<ApiResponse<Lecture[]>>
+): Promise<ApiResponse<Lecture[]>> => {
+  const key = fetchFn.name;
+  if (cachedApi.has(key)) {
+    const cached = cachedApi.get(key);
+    if (cached) return Promise.resolve(cached);
+  }
+
+  const promise = fetchFn().then((res) => {
+    cachedApi.set(key, res);
+    return res;
+  });
+
+  return promise;
+};
+
+const fetchMajors = () => axios.get<Lecture[]>("/schedules-majors.json");
+const fetchLiberalArts = () =>
+  axios.get<Lecture[]>("/schedules-liberal-arts.json");
+
+const cachedFetchMajors = () => cachedFetch(fetchMajors);
+const cachedFetchLiberalArts = () => cachedFetch(fetchLiberalArts);
 
 const fetchAllLectures = async (): Promise<Lecture[]> => {
   // 이미 캐시된 데이터가 있으면 반환
@@ -67,8 +98,15 @@ const fetchAllLectures = async (): Promise<Lecture[]> => {
 
     try {
       const [majorsResult, liberalArtsResult] = await Promise.all([
-        axios.get<Lecture[]>("/schedules-majors.json"),
-        axios.get<Lecture[]>("/schedules-liberal-arts.json"),
+        (console.log("API Call 1", performance.now()), cachedFetchMajors()),
+        (console.log("API Call 2", performance.now()),
+        cachedFetchLiberalArts()),
+        (console.log("API Call 3", performance.now()), cachedFetchMajors()),
+        (console.log("API Call 4", performance.now()),
+        cachedFetchLiberalArts()),
+        (console.log("API Call 5", performance.now()), cachedFetchMajors()),
+        (console.log("API Call 6", performance.now()),
+        cachedFetchLiberalArts()),
       ]);
 
       const allLectures = [...majorsResult.data, ...liberalArtsResult.data];
@@ -338,19 +376,7 @@ const SearchDialog = memo(({ searchInfo, onClose }: Props) => {
 
             <Text align="right">검색결과: {filteredLectures.length}개</Text>
             <Box>
-              <Table>
-                <Thead>
-                  <Tr>
-                    <Th width="100px">과목코드</Th>
-                    <Th width="50px">학년</Th>
-                    <Th width="200px">과목명</Th>
-                    <Th width="50px">학점</Th>
-                    <Th width="150px">전공</Th>
-                    <Th width="150px">시간</Th>
-                    <Th width="80px"></Th>
-                  </Tr>
-                </Thead>
-              </Table>
+              <SearchTableHeader />
 
               <Box overflowY="auto" maxH="500px" ref={loaderWrapperRef}>
                 <Table size="sm" variant="striped">

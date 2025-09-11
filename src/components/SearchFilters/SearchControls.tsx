@@ -67,11 +67,23 @@ const NumberCheckboxGroup = memo(
     value: number[];
     onChange: (value: number[]) => void;
     colorScheme?: string;
-  }) => (
-    <CheckboxGroup value={value} onChange={onChange} colorScheme={colorScheme}>
-      {children}
-    </CheckboxGroup>
-  )
+  }) => {
+    // Chakra UI CheckboxGroup은 string[]을 기대하므로 변환
+    const stringValue = value.map(String);
+    const handleChange = (stringValues: string[]) => {
+      onChange(stringValues.map(Number));
+    };
+
+    return (
+      <CheckboxGroup
+        value={stringValue}
+        onChange={handleChange}
+        colorScheme={colorScheme}
+      >
+        {children}
+      </CheckboxGroup>
+    );
+  }
 );
 
 NumberCheckboxGroup.displayName = "NumberCheckboxGroup";
@@ -151,7 +163,7 @@ const GradeFilter = memo(({ value, onChange }: GradeFilterProps) => {
       <NumberCheckboxGroup value={value} onChange={onChange}>
         <HStack spacing={4}>
           {[1, 2, 3, 4].map((grade) => (
-            <Checkbox key={grade} value={grade}>
+            <Checkbox key={grade} value={String(grade)}>
               {grade}학년
             </Checkbox>
           ))}
@@ -226,7 +238,7 @@ const TimeFilter = memo(({ value, onChange }: TimeFilterProps) => {
         >
           {TIME_SLOTS.map(({ id, label }) => (
             <Box key={id}>
-              <Checkbox size="sm" value={id}>
+              <Checkbox size="sm" value={String(id)}>
                 {id}교시({label})
               </Checkbox>
             </Box>
